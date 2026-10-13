@@ -13,10 +13,11 @@ interface UseGoogleMapsParams {
   directRadiation: number;
   materialType: MaterialType;
   climateData: SimulationResponse | null;
+  walkMode?: 'road' | 'sidewalk';
   onLocationChange?: (newLoc: { lat: number; lng: number }) => void;
   onPOVChanged: (heading: number, pitch: number, zoom: number) => void;
-  // [보완] 이동 시 새 좌표(nextLoc)까지 전달받도록 타입 시그니처 일치
   onStepForward?: (newHeading: number, nextLoc: { lat: number; lng: number }) => void;
+  onPanoChanged?: (panoId: string) => void;
 }
 
 export const useGoogleMapsStreetView = ({
@@ -29,15 +30,22 @@ export const useGoogleMapsStreetView = ({
   directRadiation,
   materialType,
   climateData,
+  walkMode = 'road',
   onLocationChange,
   onPOVChanged,
   onStepForward,
+  onPanoChanged,
 }: UseGoogleMapsParams) => {
-  const panoramaInstanceRef = useRef<unknown>(null);
-  const mapInstanceRef = useRef<unknown>(null);
-  const markerInstanceRef = useRef<unknown>(null);
-  const sunBeamPolylineRef = useRef<unknown>(null);
-  const mapMarkersRef = useRef<unknown[]>([]);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const panoramaInstanceRef = useRef<any>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const mapInstanceRef = useRef<any>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const markerInstanceRef = useRef<any>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const sunBeamPolylineRef = useRef<any>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const mapMarkersRef = useRef<any[]>([]);
   const currentHeadingRef = useRef<number>(heading);
 
   const updateSunBeamOnMap = (center: { lat: number; lng: number }, azimuth: number) => {
@@ -52,8 +60,7 @@ export const useGoogleMapsStreetView = ({
       { lat: center.lat + Math.cos(rad) * beamDist, lng: center.lng + Math.sin(rad) * beamDist },
     ];
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const polyline = sunBeamPolylineRef.current as any;
+    const polyline = sunBeamPolylineRef.current;
     if (polyline) {
       polyline.setPath(path);
     } else {
@@ -72,86 +79,96 @@ export const useGoogleMapsStreetView = ({
     }
   };
 
-  const updateMapMarkers = (
-    center: { lat: number; lng: number },
-    roadHeading: number,
-    points: NonNullable<SimulationResponse['gridPoints']>,
-    currentMaterial: MaterialType
-  ) => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const g = (window as unknown as { google?: any }).google;
-    if (!mapInstanceRef.current || !g?.maps) return;
-
-    mapMarkersRef.current.forEach((m) => {
+  // 🏢 지도 화면 내 실제 건물 기준 태양 전면(양지)/후면(음지) 온도 마커 표시
+  // 🏢 태양 기준 건물 블록 전면(양지)/후면(음지) 대형 타이포그래피 텍스트 표시
+    const updateMapMarkers = (
+      center: { lat: number; lng: number },
+      _roadHeading: number,
+      _points: NonNullable<SimulationResponse['gridPoints']>,
+      currentMaterial: MaterialType
+    ) => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (m as any)?.setMap(null);
-    });
-    mapMarkersRef.current = [];
+      const g = (window as unknown as { google?: any }).google;
+      if (!mapInstanceRef.current || !g?.maps) return;
 
-    const offsetDistance = currentMaterial === 'sidewalk' ? 3.5 : 0.0;
-    const safeHeading = Number.isFinite(roadHeading) ? roadHeading : 0;
-    const roadRad = THREE.MathUtils.degToRad(safeHeading);
-    const metersPerLat = 111000.0;
-    const metersPerLng = 88000.0;
-
-    const fwdX = Math.sin(roadRad);
-    const fwdZ = -Math.cos(roadRad);
-    const sideX = Math.cos(roadRad);
-    const sideZ = Math.sin(roadRad);
-
-    // [개선] 3D 가로수길 8그루 라인(4m ~ 46m)과 1:1로 일치시킨 8개 좌표
-    const visualDists = [4.0, 10.0, 16.0, 22.0, 28.0, 34.0, 40.0, 46.0];
-
-    visualDists.forEach((dist, idx) => {
-      const pt = points[idx % (points.length || 1)];
-      const isShadow = pt?.isShadow ?? false;
-      const rawTemp = (pt && typeof pt.asphaltTemp === 'number')
-        ? pt.asphaltTemp
-        : (isShadow ? baseAir - 1.2 : baseAir + (directRadiation / 950.0) * 16.0);
-      const distVariation = Math.sin(idx * 1.3) * 0.4 + (idx * 0.15);
-      const sidewalkReduction = isShadow ? 1.5 : 9.5;
-
-      const targetTemp = currentMaterial === 'sidewalk'
-        ? Math.max(baseAir - 1.0, rawTemp - sidewalkReduction + distVariation)
-        : (rawTemp + distVariation);
-
-      const isOver30 = targetTemp > 10.0 || (baseAir + 14.0) > 30.0;
-      // 3D 뷰의 sideOffset(5.2m)과 동일하게 보도블럭 우측 라인에 핀 배치
-      const markerOffset = isOver30 ? 5.2 : offsetDistance;
-      const colorHex = isShadow ? '#00e5ff' : (currentMaterial === 'sidewalk' ? '#f59e0b' : '#ff4d4f');
-
-      const dNorthMeters = -(fwdZ * dist + sideZ * markerOffset);
-      const dEastMeters = fwdX * dist + sideX * markerOffset;
-
-      const markerPos = {
-        lat: center.lat + dNorthMeters / metersPerLat,
-        lng: center.lng + dEastMeters / metersPerLng,
-      };
-
-      const mapMarker = new g.maps.Marker({
-        position: markerPos,
-        map: mapInstanceRef.current,
-        title: isOver30 ? `[야자수 가로수 #${idx + 1}] 전방 ${dist.toFixed(1)}m` : `전방 ${dist.toFixed(1)}m 노면`,
-        icon: isOver30
-          ? {
-              url: 'https://cdn-icons-png.flaticon.com/512/3429/3429141.png',
-              scaledSize: new g.maps.Size(24, 24),
-              origin: new g.maps.Point(0, 0),
-              anchor: new g.maps.Point(12, 24),
-            }
-          : {
-              path: g.maps.SymbolPath.CIRCLE,
-              scale: 6,
-              fillColor: colorHex,
-              fillOpacity: 0.9,
-              strokeColor: '#ffffff',
-              strokeWeight: 1.5,
-            },
+      // 기존 마커 제거
+      mapMarkersRef.current.forEach((m) => {
+        try {
+          m?.setMap(null);
+        } catch {
+          // ignore
+        }
       });
+      mapMarkersRef.current = [];
 
-      mapMarkersRef.current.push(mapMarker);
-    });
-  };
+      const metersPerLat = 111000.0;
+      const metersPerLng = 88000.0;
+      const sunRad = THREE.MathUtils.degToRad(sunAzimuth);
+
+      // 재질별 반사율 및 온도 계산
+      const albedoFactor = currentMaterial === 'sidewalk' ? 0.82 : 1.0;
+      const frontVal = (baseAir + (directRadiation / 950.0) * 16.2 * albedoFactor).toFixed(2);
+      const backVal = Math.max(baseAir - 1.2, baseAir + (directRadiation / 950.0) * 2.5 * albedoFactor).toFixed(2);
+
+      // 🏢 내 위치 도로변이 아닌, 우측 대형 건물군 중심 기준
+      const bldCenterLat = center.lat + 15.0 / metersPerLat;
+      const bldCenterLng = center.lng + 75.0 / metersPerLng;
+
+      // 태양 방위각 방향으로 시원하게 벌어지는 거리 (전면/후면 65m)
+      const spreadDist = 65.0;
+      const fwdNorth = Math.cos(sunRad) * spreadDist;
+      const fwdEast = Math.sin(sunRad) * spreadDist;
+
+      const typographyMarkers = [
+        // ☀️ 태양 전면 (양지 노면 반사온도)
+        {
+          text: frontVal,
+          lat: bldCenterLat + fwdNorth / metersPerLat,
+          lng: bldCenterLng + fwdEast / metersPerLng,
+          strokeColor: '#ea580c', // 선명한 오렌지 외곽선
+        },
+        // 🌑 태양 후면 (음지/그늘 노면 반사온도)
+        {
+          text: backVal,
+          lat: bldCenterLat - fwdNorth / metersPerLat,
+          lng: bldCenterLng - fwdEast / metersPerLng,
+          strokeColor: '#f97316', // 주황 외곽선
+        },
+      ];
+
+      typographyMarkers.forEach((cfg) => {
+        // 🎨 스케치와 동일한 흰색 채움 + 굵은 주황색 외곽선 타이포그래피 SVG
+        const svg = `
+          <svg xmlns="http://www.w3.org/2000/svg" width="220" height="90" viewBox="0 0 220 90">
+            <text x="110" y="62"
+                  text-anchor="middle"
+                  font-family="system-ui, -apple-system, sans-serif, 'Noto Sans KR'"
+                  font-size="52"
+                  font-weight="900"
+                  fill="#ffffff"
+                  stroke="${cfg.strokeColor}"
+                  stroke-width="7"
+                  stroke-linejoin="round"
+                  paint-order="stroke fill">
+              ${cfg.text}
+            </text>
+          </svg>
+        `.trim();
+
+        const marker = new g.maps.Marker({
+          position: { lat: cfg.lat, lng: cfg.lng },
+          map: mapInstanceRef.current,
+          icon: {
+            url: `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`,
+            scaledSize: new g.maps.Size(150, 62),
+            anchor: new g.maps.Point(75, 31),
+          },
+          zIndex: 9999,
+        });
+
+        mapMarkersRef.current.push(marker);
+      });
+    };
 
   useEffect(() => {
     let isCleanedUp = false;
@@ -211,6 +228,16 @@ export const useGoogleMapsStreetView = ({
         onPOVChanged(safeHeading, safePitch, safeZoom);
       };
 
+      panorama.addListener('pano_changed', () => {
+        const panoId = panorama.getPano();
+        if (panoId) {
+          console.log('📍 현재 스트리트뷰 Pano ID:', panoId);
+          if (onPanoChanged) {
+            onPanoChanged(panoId);
+          }
+        }
+      });
+
       panorama.addListener('pov_changed', handlePOV);
       panorama.addListener('zoom_changed', handlePOV);
       panorama.addListener('position_changed', () => {
@@ -230,7 +257,6 @@ export const useGoogleMapsStreetView = ({
 
           updateMapMarkers(next, curHeading, climateData?.gridPoints || [], materialType);
 
-          // [핵심] 걸어갈 때마다 바뀐 위치(next)를 3D 씬으로 넘겨서 나무를 상대 거리만큼 스쳐 지나가게 함
           if (onStepForward) {
             onStepForward(curHeading, next);
           }
@@ -238,20 +264,20 @@ export const useGoogleMapsStreetView = ({
       });
 
       updateSunBeamOnMap(location, sunAzimuth);
+      updateMapMarkers(location, safeInitialHeading, climateData?.gridPoints || [], materialType);
       handlePOV();
     };
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const gCheck = (window as unknown as { google?: any }).google;
-        if (!document.getElementById('google-maps-script') && !gCheck?.maps) {
-          const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || 'AIzaSyBFkCNMvQEdgwEq4iuJPvEDGFmZxp9gPQI';
-          const script = document.createElement('script');
-          script.id = 'google-maps-script';
-          script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=geometry`;
-          script.async = true;
-          document.head.appendChild(script);
-        }
+    const gCheck = (window as unknown as { google?: any }).google;
+    if (!document.getElementById('google-maps-script') && !gCheck?.maps) {
+      const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || 'AIzaSyBFkCNMvQEdgwEq4iuJPvEDGFmZxp9gPQI';
+      const script = document.createElement('script');
+      script.id = 'google-maps-script';
+      script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=geometry,places`;
+      script.async = true;
+      document.head.appendChild(script);
+    }
 
     const interval = setInterval(() => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -268,7 +294,51 @@ export const useGoogleMapsStreetView = ({
     };
   }, []);
 
-  // 상태 변동 시 지도 마커 갱신
+  // 🚶 보도블럭 ↔ 🛣️ 도로 전환 시 시점 전환
+  useEffect(() => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const g = (window as unknown as { google?: any }).google;
+    if (!panoramaInstanceRef.current || !g?.maps) return;
+
+    const panorama = panoramaInstanceRef.current;
+    const baseHeading = currentHeadingRef.current;
+
+    if (walkMode === 'sidewalk') {
+      panorama.setPov({
+        heading: (baseHeading + 32) % 360,
+        pitch: -8,
+      });
+      panorama.setZoom(1.15);
+
+      const svService = new g.maps.StreetViewService();
+      const rightRad = THREE.MathUtils.degToRad(baseHeading + 90);
+      const metersPerLat = 111000.0;
+      const metersPerLng = 88000.0;
+      const sideLat = location.lat + (Math.cos(rightRad) * 4.5) / metersPerLat;
+      const sideLng = location.lng + (Math.sin(rightRad) * 4.5) / metersPerLng;
+
+      svService.getPanorama(
+        {
+          location: { lat: sideLat, lng: sideLng },
+          radius: 15,
+          preference: g.maps.StreetViewPreference.NEAREST,
+        },
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (data: any, status: any) => {
+          if (status === g.maps.StreetViewStatus.OK && data?.location?.pano) {
+            panorama.setPano(data.location.pano);
+          }
+        }
+      );
+    } else {
+      panorama.setPov({
+        heading: baseHeading,
+        pitch: 0,
+      });
+      panorama.setZoom(1.0);
+    }
+  }, [walkMode, location]);
+
   useEffect(() => {
     updateSunBeamOnMap(location, sunAzimuth);
     updateMapMarkers(

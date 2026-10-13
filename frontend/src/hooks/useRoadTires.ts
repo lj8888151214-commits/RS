@@ -5,6 +5,7 @@ import type { SimulationResponse } from '../types/climate';
 
 interface WheelItem {
   wheelPivot: THREE.Group;
+  meshes: THREE.Mesh[];
 }
 
 export const useRoadTires = () => {
@@ -19,7 +20,7 @@ export const useRoadTires = () => {
     texture: THREE.CanvasTexture;
   } | null>(null);
 
-  // 4륜 바퀴 로컬 배치 (차폭 좌우 1.4m, 축간 전후 2.2m)
+  // 4륜 바퀴 로컬 배치 (차폭 좌우 1.0m, 축간 전후 2.2m)
   const WHEEL_CONFIGS = [
     { localX: -0.5, localZ: 1.1 },  // 전륜 좌 (FL)
     { localX: 0.5, localZ: 1.1 },   // 전륜 우 (FR)
@@ -40,7 +41,7 @@ export const useRoadTires = () => {
         const model = gltf.scene;
         if (!model) return;
 
-        // 1. [핵심] 3D 형상의 기하학 데이터 원점 영점화 및 축 정비
+        // 1. 3D 형상의 기하학 데이터 원점 영점화
         model.traverse((child) => {
           if ((child as THREE.Mesh).isMesh) {
             const mesh = child as THREE.Mesh;
@@ -48,22 +49,19 @@ export const useRoadTires = () => {
             mesh.visible = true;
 
             if (mesh.geometry) {
-              mesh.geometry.center(); // 로컬 축 불일치 및 통통 튐 원인 차단
+              mesh.geometry.center();
               mesh.geometry.computeVertexNormals();
               mesh.geometry.computeBoundingBox();
             }
           }
         });
 
-        // 2. [가장 중요] 타이어가 11자로 수직 배치되도록 각도 세팅 수정
-        // 대각선 꼬임을 완전히 풀기 위해 orientContainer를 명시적으로 분리하고,
-        // model 내부와 container 외곽의 변환축이 대각선으로 합성되지 않게 오일러 회전 순서 'YXZ'로 고정시킵니다.
+        // 2. 타이어 기립 및 정렬 (설정 각도 유지)
         const orientContainer = new THREE.Group();
-
-        // standard glb 바퀴를 곧게 세우고 진행방향(앞)으로 수직 11자 배치
+        model.position.set(0, 0, 0);
         model.rotation.set(0, 0, 0);
-        model.rotation.x = Math.PI / 3.5; // 수직 기립
-        model.rotation.y = Math.PI / 3.5; // 11자 방향 전방 정렬
+        model.rotation.x = Math.PI / 3.5;
+        model.rotation.y = Math.PI / 3.5;
 
         orientContainer.add(model);
 
@@ -83,7 +81,7 @@ export const useRoadTires = () => {
 
         tireTemplateRef.current = orientContainer;
 
-        // 자식 오브젝트 청소
+        // 기존 자식 청소
         while (carGroup.children.length > 0) {
           carGroup.remove(carGroup.children[0]);
         }
@@ -93,34 +91,45 @@ export const useRoadTires = () => {
         finalBbox.getSize(finalSize);
         const wheelRadius = finalSize.y / 2;
 
-        // 4. 4륜 정밀 세로 정렬 배치
+        // 4. 4륜 정밀 세로 정렬 배치 및 메쉬/머터리얼 복제 수집
         wheelsRef.current = WHEEL_CONFIGS.map((cfg) => {
           const itemGroup = new THREE.Group();
 
-          // 휠 Pivot 생성
           const wheelPivot = new THREE.Group();
-          wheelPivot.position.set(0, wheelRadius, 0); // 바퀴 반경만큼 들어 올려 지면에 안착
+          wheelPivot.position.set(0, wheelRadius, 0);
 
           const tireInstance = orientContainer.clone(true);
           tireInstance.position.set(0, 0, 0);
           tireInstance.visible = true;
 
-          // Pivot 하위에 정직하게 삽입
+          // 색상 제어를 위해 각 바퀴 메쉬들의 머터리얼을 독립 복제
+          const childMeshes: THREE.Mesh[] = [];
+          tireInstance.traverse((child) => {
+            if ((child as THREE.Mesh).isMesh) {
+              const mesh = child as THREE.Mesh;
+              if (mesh.material) {
+                if (Array.isArray(mesh.material)) {
+                  mesh.material = mesh.material.map((mat) => mat.clone());
+                } else {
+                  mesh.material = mesh.material.clone();
+                }
+              }
+              childMeshes.push(mesh);
+            }
+          });
+
           wheelPivot.add(tireInstance);
           itemGroup.add(wheelPivot);
 
-          // 4륜 좌표 지정 (대각선 뒤틀림 방지를 위해 정확한 localX, localZ만 대입)
           itemGroup.position.set(cfg.localX, 0, cfg.localZ);
-
-          // 바퀴 개별의 Y, Z축 미세 틀어짐 방지 (11자 세로 직선 유지)
           itemGroup.rotation.set(0, 0, 0);
 
           carGroup.add(itemGroup);
 
-          return { wheelPivot };
+          return { wheelPivot, meshes: childMeshes };
         });
 
-        // 5. 바닥 통합 뱃지 추가 (Z-fighting 방지)
+        // 5. 바닥 통합 뱃지 추가
         const canvas = document.createElement('canvas');
         canvas.width = 320;
         canvas.height = 110;
@@ -134,7 +143,7 @@ export const useRoadTires = () => {
             depthWrite: false,
           })
         );
-        badge.position.set(0, -0.12, 0.1);
+        badge.position.set(0, -0.72, 0.1);
         badge.scale.set(1.6, 0.55, 1);
         badge.renderOrder = 4500;
 
@@ -149,7 +158,7 @@ export const useRoadTires = () => {
     );
   };
 
-  // 앞으로 굴러가는 애니메이션 (프레임당 회전각)
+  // 앞으로 굴러가는 애니메이션
   const rollTires = () => {
     if (wheelsRef.current.length === 0) return;
 
@@ -157,44 +166,73 @@ export const useRoadTires = () => {
     tireRotationRef.current -= rollingSpeed;
 
     wheelsRef.current.forEach((item) => {
-      // 👈 [주목] 대각선으로 틀어지지 않고 순수하게 주행 방향(로컬 X축)으로만 회전시킵니다.
-      // 회전 중 자잘한 y, z 떨림을 '0'으로 강제해 대각선 왕복 진동 궤도를 전면 제거했습니다.
       item.wheelPivot.rotation.x = tireRotationRef.current;
       item.wheelPivot.rotation.y = 0;
       item.wheelPivot.rotation.z = 0;
     });
   };
 
-  // 차량 위치 및 단일 통합 뱃지 업데이트
+  // 차량 위치, 메쉬 색상(온도 대응) 및 단일 통합 뱃지 업데이트
   const updateRoadTires = (
     roadHeading: number,
     data: SimulationResponse | null,
-    baseAir: number
+    baseAir: number,
+    walkMode: 'road' | 'sidewalk' = 'road'
   ) => {
     const carGroup = carGroupRef.current;
     if (!carGroup || wheelsRef.current.length === 0) return;
 
     carGroup.visible = true;
 
-    // 도로 전방 6.0m 중앙 배치
     const roadRad = THREE.MathUtils.degToRad(roadHeading);
     const fwdX = Math.sin(roadRad);
     const fwdZ = -Math.cos(roadRad);
 
+    const rightX = Math.cos(roadRad);
+    const rightZ = Math.sin(roadRad);
+
     const vehicleDist = 6.0;
-    const posX = fwdX * vehicleDist;
-    const posZ = fwdZ * vehicleDist;
-    const groundY = -1.45; // 노면에 스치듯이 안착
+    const isSidewalk = walkMode === 'sidewalk';
+    const sideOffset = isSidewalk ? 3.8 : 0.0;
+    const groundY = isSidewalk ? -1.25 : -1.45;
+
+    const posX = fwdX * vehicleDist + rightX * sideOffset;
+    const posZ = fwdZ * vehicleDist + rightZ * sideOffset;
 
     carGroup.position.set(posX, groundY, posZ);
+    carGroup.rotation.set(0, -roadRad, 0);
 
-    // 차체의 월드 Yaw를 진행 방향으로 엄격하게 정렬
-    carGroup.rotation.set(0, -roadRad, 0); // Y축 외 회전 완전 0으로 제어
-
-    // 온도 매핑
+    // 온도 매핑 (20도 기준선)
     const pt = data?.gridPoints?.[0];
     const surfaceTemp = pt && typeof pt.asphaltTemp === 'number' ? pt.asphaltTemp : baseAir + 8.0;
-    const isHighTemp = surfaceTemp > 35.0;
+    const isHighTemp = surfaceTemp > 29.9;
+
+    // 20도 이상 시 타이어를 붉게 변경
+    wheelsRef.current.forEach((wheel) => {
+      wheel.meshes.forEach((mesh) => {
+        const mat = mesh.material as THREE.MeshStandardMaterial;
+        if (mat) {
+          if (isHighTemp) {
+            if (mat.emissive) {
+              mat.emissive.setHex(0xff1111);
+              mat.emissiveIntensity = 1.2;
+            }
+            if (mat.color) {
+              mat.color.setHex(0xff3333);
+            }
+          } else {
+            if (mat.emissive) {
+              mat.emissive.setHex(0x000000);
+              mat.emissiveIntensity = 0;
+            }
+            if (mat.color) {
+              mat.color.setHex(0xffffff);
+            }
+          }
+          mat.needsUpdate = true;
+        }
+      });
+    });
 
     // 단일 메시지 뱃지 갱신
     if (singleBadgeRef.current) {
@@ -213,7 +251,7 @@ export const useRoadTires = () => {
       ctx.fillStyle = '#94a3b8';
       ctx.font = 'bold 18px sans-serif';
       ctx.textAlign = 'left';
-      ctx.fillText('🛞 4륜 타이어 접지 노면', 20, 36);
+      ctx.fillText(isSidewalk ? '🧱 보도블럭 접지면' : '🛞 4륜 타이어 접지 노면', 20, 36);
 
       ctx.fillStyle = '#ffffff';
       ctx.font = 'bold 38px sans-serif';
