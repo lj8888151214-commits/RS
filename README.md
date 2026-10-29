@@ -71,13 +71,27 @@
 - **Canvas Texture 기반 동적 노면 상태 뱃지 오버레이**
   - 3D 공간 내 텍스트 왜곡과 Z-fighting을 방지하기 위해 단일 Sprite 뱃지 시스템 구축
   - 노면 온도 임계치(35°C)에 따라 동적으로 상태(정상접지 / 과열주의) 및 테마 컬러 전환
+  - 
 
 ---
 
 ### 📱 5. 주요 화면 시각 자료
 
-| 3D 도로 미기후 & 4륜 타이어 접지 시뮬레이션 (인천 송도) | 노면 과열 모니터링 및 3D 뱃지 상세 |
-| :---: | :---: |
-| <!-- 캡처하신 브라우저 실행 화면 이미지를 여기에 드래그 앤 드롭하세요 --> <br> <img width="809" height="438" alt="image" src="https://github.com/user-attachments/assets/f3d49107-ae4a-458f-8178-8cf80c7c853b" />
-| <!-- 상세 뱃지 또는 기능 화면 이미지를 여기에 드래그 앤 드롭하세요 --> <br><img width="1920" height="1040" alt="image" src="https://github.com/user-attachments/assets/6d1405b4-b80c-4606-9658-0c9ac34b2e9d" />
+
+
+#### 1. 🧊 표면 온도에 따른 환경
+> **3D 모델링을 통한 야자수 시각화**
+<p align="center">
+  <img width="809" height="438" alt="image" src="https://github.com/user-attachments/assets/f3d49107-ae4a-458f-8178-8cf80c7c853b" />
+</p>
+
+---
+
+#### 2. 📋 메뉴 및 재료 관리
+> **기본 메뉴 추가 및 냉장고 재료 잔여량 관리**
+<p align="center">
+  <br><img width="1920" height="1040" alt="image" src="https://github.com/user-attachments/assets/6d1405b4-b80c-4606-9658-0c9ac34b2e9d" />
+</p>
+
+---
 
