@@ -87,8 +87,8 @@
 
 ---
 
-#### 2. 📋 메뉴 및 재료 관리
-> **기본 메뉴 추가 및 냉장고 재료 잔여량 관리**
+#### 2. 📋 표면 온도에 따른 환경
+> **온도가 낮아지면 반려견과 산책하는 기분을 들게 만든다.**
 <p align="center">
   <br><img width="1920" height="1040" alt="image" src="https://github.com/user-attachments/assets/6d1405b4-b80c-4606-9658-0c9ac34b2e9d" />
 </p>
